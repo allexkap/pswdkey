@@ -8,7 +8,8 @@
 #include <Keyboard.h>
 
 // eeprom stub
-const char *PASSWORDS[] = {
+const size_t PASSWORDS_LEN = 3;
+const char *PASSWORDS[PASSWORDS_LEN] = {
     "first slot",
     "second slot",
     "veryverryverylongpasswordtwiceveryverryverylongpasswordtwice",
@@ -43,17 +44,15 @@ uint8_t readCode() {
   return code;
 }
 
-int passwordWrite(uint8_t num, uint32_t dt = 20) {
-  if (num >= sizeof PASSWORDS)
-    return 0;
+void passwordWrite(uint8_t num, uint32_t dt = 20) {
+  if (num >= PASSWORDS_LEN)
+    return;
 
   char *str = PASSWORDS[num];
   for (int i = 0; str[i]; ++i) {
     Keyboard.write(str[i]);
     delay(dt);
   }
-
-  return num;
 }
 
 void setup() {
@@ -71,6 +70,8 @@ void setup() {
 
 void loop() {
   uint8_t code = readCode();
-  if (code)
-    Serial.println(passwordWrite(code - 2));
+  if (code) {
+    Serial.println(code);
+    passwordWrite(code - 2);
+  }
 }
