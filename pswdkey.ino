@@ -1,57 +1,80 @@
 #define RELEASE_TIMEOUT 400
 #define LONG_TIMEOUT 400
+#define ERROR_TIMEOUT 4000
 
 #define GND A1
-#define IO A0
+#define BTN A0
 #define VCC 9
+#define LED LED_BUILTIN
 
 #include <Keyboard.h>
+#include <EEPROM.h>
 
-// eeprom stub
-const size_t PASSWORDS_LEN = 3;
-const char *PASSWORDS[PASSWORDS_LEN] = {
-    "first slot",
-    "second slot",
-    "veryverryverylongpasswordtwiceveryverryverylongpasswordtwice",
-};
+const size_t PASSWORDS_COUNT = 30;
+String PASSWORDS[PASSWORDS_COUNT] = {};
 
-uint8_t readCode() {
-  uint8_t code = 1;
-  uint32_t ts_now, ts_prev;
-  uint8_t button_now, button_prev = false;
-
-  while (code == 1 || button_now || ts_now - ts_prev < RELEASE_TIMEOUT) {
-    button_now = digitalRead(IO);
-    if (!button_now && code == 1)
-      return 0;
-
-    ts_now = millis();
-    if (button_now != button_prev) {
-      if (button_now)
-        code <<= 1;
-      else if (ts_now - ts_prev > LONG_TIMEOUT)
-        ++code;
-      button_prev = button_now;
-      ts_prev = ts_now;
-    }
-
-    digitalWrite(LED_BUILTIN, button_now && ts_now - ts_prev > LONG_TIMEOUT);
+void panic() {
+  for (;;) {
+    digitalWrite(LED, HIGH);
+    delay(500);
+    digitalWrite(LED, LOW);
+    delay(500);
   }
-
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(100);
-  digitalWrite(LED_BUILTIN, LOW);
-  return code;
 }
 
-void passwordWrite(uint8_t num, uint32_t dt = 20) {
-  if (num >= PASSWORDS_LEN)
-    return;
+void savePasswords() {
+  size_t eeprom_addr = 0;
+  for (size_t i = 0; i < PASSWORDS_COUNT; ++i) {
+    for (size_t j = 0; !j || PASSWORDS[i][j - 1]; ++j) {
+      EEPROM.update(eeprom_addr++, PASSWORDS[i][j]);
+      if (eeprom_addr == EEPROM.length()) panic();
+    }
+  }
+}
 
-  char *str = PASSWORDS[num];
-  for (int i = 0; str[i]; ++i) {
+void loadPasswords() {
+  size_t eeprom_addr = 0;
+  for (size_t i = 0; i < PASSWORDS_COUNT; ++i) {
+    char ch;
+    while (ch = EEPROM.read(eeprom_addr++)) {
+      if (eeprom_addr == EEPROM.length()) panic();
+      PASSWORDS[i] += ch;
+    }
+  }
+}
+
+size_t readInput() {
+  size_t code = 1;
+  uint32_t ts_now = 0, ts_prev = 0;
+  bool status = false;
+
+  for (;;) {
+    ts_now = millis();
+
+    if (status != digitalRead(BTN)) {
+      status = !status;
+      if (status) {
+        code <<= 1;
+      } else if (ts_now - ts_prev > LONG_TIMEOUT) {
+        ++code;
+      }
+
+      ts_prev = ts_now;
+    } else if (!status && ts_now - ts_prev > RELEASE_TIMEOUT) {
+      return code;
+    }
+
+    digitalWrite(LED, status && ts_now - ts_prev > LONG_TIMEOUT);
+  }
+}
+
+void sendPassword(size_t num, uint32_t ms = 20) {
+  String str;
+  if (num >= PASSWORDS_COUNT || !(str = PASSWORDS[num]).length()) str = "Slot " + String(num);
+
+  for (size_t i = 0; str[i]; ++i) {
     Keyboard.write(str[i]);
-    delay(dt);
+    delay(ms);
   }
 }
 
@@ -63,15 +86,19 @@ void setup() {
   digitalWrite(VCC, LOW);
   pinMode(VCC, OUTPUT);
   digitalWrite(VCC, HIGH);
-  pinMode(IO, INPUT);
+  pinMode(BTN, INPUT);
 
-  pinMode(LED_BUILTIN, OUTPUT);
+  loadPasswords();
 }
 
 void loop() {
-  uint8_t code = readCode();
-  if (code) {
-    Serial.println(code);
-    passwordWrite(code - 2);
-  }
+  size_t code = readInput();
+  if (code < 2) return;
+
+  digitalWrite(LED, HIGH);
+  delay(100);
+  digitalWrite(LED, LOW);
+
+  Serial.println(code);
+  sendPassword(code - 2);
 }
